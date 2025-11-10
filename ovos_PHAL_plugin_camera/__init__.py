@@ -1,5 +1,6 @@
 import os
 from typing import Optional, Iterable
+from threading import Thread
 
 import cv2
 import numpy as np
@@ -126,16 +127,15 @@ class Camera:
 
 
 class PHALCamera(PHALPlugin):
-    def __init__(self, bus, name: str = "phal_camera", config: Optional[dict] = None):
+    def __init__(self, bus, name: str = "ovos-phal-plugin-camera", config: Optional[dict] = None):
         """
         Initialize a PHALCamera plugin.
 
         Args:
             bus: The message bus instance.
-            name (str): The name of the plugin. Default is "phal_camera".
+            name (str): The name of the plugin. Default is "ovos-phal-plugin-camera".
             config (Optional[dict]): Configuration dictionary. Default is None.
         """
-        config = config or {}
         super().__init__(bus, name, config)
         self.camera = Camera(self.config.get("video_source", 0))
         self.bus.on("ovos.phal.camera.ping", self.handle_pong)
@@ -227,8 +227,31 @@ class PHALCamera(PHALPlugin):
         Run the plugin. If configured, start the MJPEG server.
         """
         if self.config.get("serve_mjpeg"):
+            LOG.info("Starting MJPEG server")
+            host = self.config.get("mjpeg_host", "0.0.0.0")
+            port = self.config.get("mjpeg_port", 5000)
+            LOG.info(f"MJPEG server will listen on {host}:{port}")
             app = MJPEGServer.get_mjpeg_server(self.camera)
-            app.run(host="0.0.0.0", port=self.config.get("mjpeg_port", 5000))
+            LOG.info("Flask app created, starting server in background thread...")
+            
+            def run_server():
+                try:
+                    app.run(
+                        host=host,
+                        port=port,
+                        debug=False,
+                        threaded=True,
+                        use_reloader=False
+                    )
+                except Exception as e:
+                    LOG.error(f"Failed to start MJPEG server: {e}")
+            
+            # Start Flask in a daemon thread so it doesn't block PHAL
+            server_thread = Thread(target=run_server, daemon=True)
+            server_thread.start()
+            LOG.info("MJPEG server thread started")
+        else:
+            LOG.info("MJPEG server not started because config set to " + str(self.config.get("serve_mjpeg")))
 
     def validate_message_context(self, message):
         sid = SessionManager.get(message).session_id
@@ -275,7 +298,7 @@ class MJPEGServer:
         @app.route('/video_feed')
         def video_feed() -> Response:
             """Stream video frames over HTTP."""
-            return Response(MJPEGServer.gen_frames(camera), mimetype='multipart/x-mixed-replace; boundary=frame')
+            return Response(MJPEGServer.gen_frames(camera), content_type='multipart/x-mixed-replace; boundary=frame')
 
         return app
 
