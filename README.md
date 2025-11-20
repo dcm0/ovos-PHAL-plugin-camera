@@ -1,13 +1,29 @@
 # Camera Plugin for OVOS PHAL
 
-This plugin allows users to interact with cameras using OpenCV or libcamera, take snapshots, and serve video streams over HTTP. It also provides methods for handling camera operations via message bus events.
+This plugin allows users to interact with cameras using OpenCV or libcamera, take snapshots, and serve video streams over HTTP. It also provides comprehensive message bus integration for camera control, settings management, and AI camera support (IMX500).
 
 ## Features
 
-- Detect and use compatible camera systems (libcamera on Raspberry Pi or OpenCV on other systems).
-- Open and close the camera dynamically.
-- Capture frames and save them to a file or return them as base64-encoded strings.
-- Serve video streams as an MJPEG feed over HTTP.
+- **Camera Detection**: Automatically detect and use compatible camera systems (libcamera on Raspberry Pi or OpenCV on other systems)
+- **Dynamic Control**: Open and close the camera dynamically via bus messages
+- **Error Recovery**: Restart or reset camera to recover from errors or hung states
+- **Image Capture**: Capture frames and save them to a file or return as base64-encoded strings
+- **MJPEG Streaming**: Serve video streams as an MJPEG feed over HTTP
+- **Settings Management**: Configure resolution, FPS, quality, and more at runtime
+- **AI Camera Support**: Full support for Raspberry Pi AI Camera (IMX500)
+  - Load and manage AI models (.rpk format)
+  - Enable/disable on-sensor inference
+  - Real-time inference event streaming
+  - Object detection, classification, pose estimation, and more
+- **Comprehensive Bus API**: Control all features via OVOS message bus
+
+---
+
+## Quick Links
+
+- **[Complete Bus Protocol Documentation](CAMERAPROTOCOL.md)** - Comprehensive API reference for building control panels and integrations
+- **[Example Scripts](examples/)** - Ready-to-use examples for camera control, settings, and AI features
+- **[HiveMind Integration](#hivemind-support)** - Use with HiveMind satellites
 
 ---
 
@@ -101,58 +117,146 @@ The `libcamera` package is not available on PyPI and is installed system-wide on
 
 | Option         | Type   | Default   | Description                                           |
 | -------------- | ------ | --------- | ----------------------------------------------------- |
-| `video_source` | `int`  | `0`       | Index of the video source to use for the camera.      |
-| `start_open`   | `bool` | `false`   | Whether to open the camera at plugin startup.         |
-| `serve_mjpeg`  | `bool` | `false`   | Whether to start an MJPEG server for video streaming. |
-| `mjpeg_port`   | `int`  | `5000`    | Port for the MJPEG server.                            |
+| `video_source` | `int`  | `0`       | Index of the video source to use for the camera       |
+| `width`        | `int`  | `null`    | Camera capture width in pixels (auto if not set)      |
+| `height`       | `int`  | `null`    | Camera capture height in pixels (auto if not set)     |
+| `fps`          | `int`  | `null`    | Frames per second (auto if not set)                   |
+| `format`       | `str`  | `RGB888`  | Pixel format for libcamera                            |
+| `quality`      | `int`  | `85`      | JPEG compression quality (1-100)                      |
+| `start_open`   | `bool` | `false`   | Whether to open the camera at plugin startup          |
+| `serve_mjpeg`  | `bool` | `false`   | Whether to start an MJPEG server for video streaming  |
+| `mjpeg_host`   | `str`  | `0.0.0.0` | Host address for MJPEG server                         |
+| `mjpeg_port`   | `int`  | `5000`    | Port for the MJPEG server                             |
 
 ---
 
 ## Bus Events
 
-### Handled Events
+### Core Events
 
 | Event Name               | Description                       | Payload                     |
 | ------------------------ | --------------------------------- | --------------------------- |
-| `ovos.phal.camera.open`  | Opens the camera.                 | None                        |
-| `ovos.phal.camera.close` | Closes the camera.                | None                        |
-| `ovos.phal.camera.get`   | Captures a frame from the camera. | `{ "path": "<file_path>" }` |
+| `ovos.phal.camera.ping`  | Check if camera is available      | None                        |
+| `ovos.phal.camera.open`  | Opens the camera                  | None                        |
+| `ovos.phal.camera.close` | Closes the camera                 | None                        |
+| `ovos.phal.camera.get`   | Captures a frame from the camera  | `{ "path": "<file_path>" }` |
+
+### Information & Capabilities
+
+| Event Name                            | Description                          | Payload |
+| ------------------------------------- | ------------------------------------ | ------- |
+| `ovos.phal.camera.info.get`           | Get camera model and info            | None    |
+| `ovos.phal.camera.capabilities.get`   | Get available modes and capabilities | None    |
+| `ovos.phal.camera.settings.get`       | Get current settings                 | None    |
+
+### Settings Control
+
+| Event Name                      | Description              | Payload                                              |
+| ------------------------------- | ------------------------ | ---------------------------------------------------- |
+| `ovos.phal.camera.settings.set` | Update camera settings   | `{ "width": 1920, "height": 1080, "fps": 30, ... }` |
+
+### AI Camera (IMX500)
+
+| Event Name                              | Description                     | Payload                                               |
+| --------------------------------------- | ------------------------------- | ----------------------------------------------------- |
+| `ovos.phal.camera.ai.model.load`        | Load AI model on IMX500         | `{ "model_path": "/path/to/model.rpk", ... }`        |
+| `ovos.phal.camera.ai.inference.set`     | Enable/disable AI inference     | `{ "enabled": true }`                                 |
+| `ovos.phal.camera.ai.inference.get`     | Get latest inference results    | None                                                  |
 
 ### Emitted Events
 
-| Event Name                      | Description                      | Payload                                                           |
-| ------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `ovos.phal.camera.get.response` | Response for the captured frame. | `{ "path": "<file_path>" }` or `{ "b64_frame": "<base64_data>" }` |
+| Event Name                              | Description                      | Payload                                                           |
+| --------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `ovos.phal.camera.pong`                 | Response to ping                 | None                                                              |
+| `ovos.phal.camera.get.response`         | Response for captured frame      | `{ "path": "<file_path>" }` or `{ "b64_frame": "<base64_data>" }` |
+| `ovos.phal.camera.info.response`        | Camera information               | Camera model, type, AI capabilities                               |
+| `ovos.phal.camera.capabilities.response`| Available modes and settings     | Resolutions, FPS options, current config                          |
+| `ovos.phal.camera.settings.response`    | Current settings                 | All configuration values                                          |
+| `ovos.phal.camera.settings.set.response`| Settings update result           | Success/failure status                                            |
+| `ovos.phal.camera.restart.response`     | Restart result                   | Success/failure status                                            |
+| `ovos.phal.camera.reset.response`       | Reset result                     | Success/failure status                                            |
+| `ovos.phal.camera.ai.inference.event`   | Continuous inference results     | Detection/classification results (auto-emitted when enabled)      |
+
+**See [CAMERAPROTOCOL.md](CAMERAPROTOCOL.md) for complete message specifications and examples.**
 
 ---
 
 ## Usage
 
-### Open the Camera
+### Basic Camera Control
 
-Send the following message to open the camera:
-
+**Open the camera:**
 ```python
 bus.emit(Message("ovos.phal.camera.open"))
 ```
 
-### Close the Camera
-
-Send the following message to close the camera:
-
+**Close the camera:**
 ```python
 bus.emit(Message("ovos.phal.camera.close"))
 ```
 
-### Capture a Frame
-
-Send the following message to capture a frame:
-
+**Capture a frame:**
 ```python
+# Save to file
 bus.emit(Message("ovos.phal.camera.get", {"path": "/path/to/save/image.jpg"}))
+
+# Get as base64
+bus.emit(Message("ovos.phal.camera.get"))
 ```
 
-If the `path` is not provided, the frame will be returned as a base64-encoded string.
+**Restart camera (error recovery):**
+```python
+bus.emit(Message("ovos.phal.camera.restart"))
+```
+
+**Reset camera to defaults:**
+```python
+bus.emit(Message("ovos.phal.camera.reset"))
+```
+
+### Camera Information & Settings
+
+**Get camera info:**
+```python
+def handle_info(message):
+    print(f"Camera: {message.data['camera_model']}")
+    print(f"AI Capable: {message.data['is_ai_camera']}")
+
+bus.once('ovos.phal.camera.info.response', handle_info)
+bus.emit(Message('ovos.phal.camera.info.get'))
+```
+
+**Update settings:**
+```python
+bus.emit(Message('ovos.phal.camera.settings.set', {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "quality": 90
+}))
+```
+
+### AI Camera (IMX500)
+
+**Load AI model:**
+```python
+bus.emit(Message('ovos.phal.camera.ai.model.load', {
+    "model_path": "/home/pi/models/object_detection.rpk",
+    "model_name": "Object Detection"
+}))
+```
+
+**Enable inference and monitor detections:**
+```python
+def handle_detections(message):
+    for detection in message.data.get('detections', []):
+        print(f"Detected: {detection['class']} ({detection['confidence']:.2f})")
+
+bus.on('ovos.phal.camera.ai.inference.event', handle_detections)
+bus.emit(Message('ovos.phal.camera.ai.inference.set', {"enabled": True}))
+```
+
+**For complete examples, see the [examples/](examples/) directory.**
 
 ### MJPEG Server
 
